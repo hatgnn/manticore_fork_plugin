@@ -1,9 +1,8 @@
-from manticore.ethereum import ManticoreEVM, ABI
+import os
 from manticore.core.plugin import Plugin
 from manticore.core.smtlib import issymbolic, taint_with, istainted
 from web3 import Web3
-w3 = Web3(Web3.WebsocketProvider('wss://'))
-# m = ManticoreEVM()
+w3 = Web3(Web3.WebsocketProvider(os.environ.get("RPC_URL", "")))
 
 class ForkPlugin(Plugin):
     """
@@ -27,7 +26,6 @@ class ForkPlugin(Plugin):
             self.import_code_from_network(state, target_addr)
 
         if instruction.semantics == "STATICCALL":
-            print("STATIICCALL ARGS")
             target_addr = arguments[1]
             self.import_code_from_network(state, target_addr)
 
@@ -51,12 +49,23 @@ class ForkPlugin(Plugin):
 
     def import_code_from_network(self, state, target_addr):
         """
-        Checks whether manticore has code at the provided address.
-        If there is no code, It will import code from the network.
+        Checks whether the address is initialised already.
+        If it is not initialised, plugin will import code from the network.
         """
         if not issymbolic(target_addr):
-            code = state.platform.get_code(target_addr) #TODO replace with has_code
-            if code == b'':
+            try:
+                state.platform.has_code(target_addr)
+            except KeyError:
+                """ 
+                Reaches this block if the address was not initialised before.
+                Not checking for the code length(outside "except") because of cases involving selfdestruct().
+                
+                Self destructed addresses will still be present in 'evm._world_state'.
+                
+                Will not get code if, 
+                    1. Initialised either by manticore or plugin
+                    2. Initialised and self destructed
+                """
                 checksummed_addr = w3.toChecksumAddress(hex(target_addr))
                 runtime_code = w3.eth.get_code(checksummed_addr)
                 state.platform.create_account(address=target_addr, code=runtime_code)
